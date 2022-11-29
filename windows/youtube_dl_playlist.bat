@@ -1,0 +1,1 @@
+youtube-dl --extract-audio --audio-format "best" --yes-playlist --output "%(playlist_index)s. %(title)s.%(ext)s" <playlist link> --playlist-start 1
