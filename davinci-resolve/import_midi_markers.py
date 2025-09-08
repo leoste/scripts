@@ -5,9 +5,8 @@
 
 import mido
 
-MIDI_FILE = r"J:\heli\projects\03. Midagi Enamat\04. Tõukerattur\tõukerattur.mid"
+MIDI_FILE = r"C:\documents\example_midi_file.mid"
 
-# Note to color mapping for 12 semitones
 NOTE_COLORS = {
     0: "Red", # C
     1: "Pink", # C#
@@ -23,12 +22,10 @@ NOTE_COLORS = {
     11: "Cream" # B
 }
 
-# load project
 pm = resolve.GetProjectManager()
 proj = pm.GetCurrentProject()
 tl = proj.GetCurrentTimeline()
 
-# get project framerate
 framerate = float(proj.GetSetting("timelineFrameRate"))
 print(f"Project framerate is: {framerate}")
 
