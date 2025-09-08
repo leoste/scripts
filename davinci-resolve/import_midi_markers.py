@@ -5,8 +5,23 @@
 
 import mido
 
-MIDI_FILE = r"C:\documents\example_midi_file.mid"
-COLOR = "Yellow"
+MIDI_FILE = r"J:\heli\projects\03. Midagi Enamat\04. Tõukerattur\tõukerattur.mid"
+
+# Note to color mapping for 12 semitones
+NOTE_COLORS = {
+    0: "Red", # C
+    1: "Pink", # C#
+    2: "Lavender", # D
+    3: "Rose", # D#
+    4: "Mint", # E
+    5: "Green", # F
+    6: "Yellow", # F#
+    7: "Sand", # G
+    8: "Cocoa", # G#
+    9: "Blue", # A
+    10: "Cyan", # A#
+    11: "Cream" # B
+}
 
 # load project
 pm = resolve.GetProjectManager()
@@ -15,7 +30,7 @@ tl = proj.GetCurrentTimeline()
 
 # get project framerate
 framerate = float(proj.GetSetting("timelineFrameRate"))
-print("Project framerate is: {framerate}")
+print(f"Project framerate is: {framerate}")
 
 mid = mido.MidiFile(MIDI_FILE)
 ticks_per_beat = mid.ticks_per_beat
@@ -32,11 +47,13 @@ for msg in merged_msgs:
     
     if msg.type == 'set_tempo':
         tempo = msg.tempo
-        print(f"Tempo: {tempo} ms per beat")
+        print(f"Tempo: {tempo} µs per beat")
     
     if msg.type == 'note_on':
+        note_index = msg.note % 12
+        color = NOTE_COLORS.get(note_index, "Yellow")  # fallback to Yellow
         frame = int(current_time_seconds * framerate)        
-        tl.AddMarker(frame, COLOR, "Beats", "Beat", 1)
-        print(f"Marker: {current_time_seconds:.3f}s / {frame}f")
+        tl.AddMarker(frame, color, f"Note {msg.note}", f"Beat ({color})", 1)
+        print(f"Marker: {current_time_seconds:.3f}s / {frame}f - Note {msg.note} -> {color}")
 
 print("Finished adding markers.")
