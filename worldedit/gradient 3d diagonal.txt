@@ -1,0 +1,9 @@
+//gen 35 
+r=random()*6;
+if(z+x+y+3<r){
+	a=3;
+}
+else{
+	a=4;
+}
+data=a;

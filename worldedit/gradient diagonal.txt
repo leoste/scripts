@@ -1,0 +1,9 @@
+//gen 35 
+r=random()*4;
+if(z+x+2<r){
+	a=3;
+}
+else{
+	a=4;
+}
+data=a;
