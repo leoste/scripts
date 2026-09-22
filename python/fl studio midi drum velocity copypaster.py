@@ -117,11 +117,12 @@ class VelocityChange:
 class Plan:
     source: Pattern
     channel_label: str
+    velocity_counts_by_key: dict[int, Counter[int]]
     velocity_by_key: dict[int, int]
-    conflicting_velocities_by_key: dict[int, list[int]]
     targets: list[Pattern]
     changes: list[VelocityChange]
-    untouched_patterns_by_key: dict[int, list[str]]
+    missing_patterns_by_key: dict[int, list[str]]
+    skipped_patterns_by_key: dict[int, list[str]]
 
 
 class FlStudioProject:
@@ -331,7 +332,7 @@ def show_intro() -> None:
 
 
 def ask_for_project() -> FlStudioProject:
-    print("Step 1 of 4  -  Which FL Studio project?")
+    print("Step 1 of 5  -  Which FL Studio project?")
     while True:
         path = Path(ask("  Drag the .flp file here (or type its path): "))
         if not path.is_file():
@@ -349,7 +350,7 @@ def ask_for_project() -> FlStudioProject:
 def ask_for_track(project: FlStudioProject) -> Track:
     if not project.tracks:
         raise Stop("This project has no playlist tracks with patterns on them.")
-    index = ask_choice("Step 2 of 4  -  Which playlist track holds the drum patterns?",
+    index = ask_choice("Step 2 of 5  -  Which playlist track holds the drum patterns?",
                        "  Enter the number of the drum track: ",
                        [track.label for track in project.tracks])
     return project.tracks[index]
@@ -357,7 +358,7 @@ def ask_for_track(project: FlStudioProject) -> Track:
 
 def ask_for_source_pattern(project: FlStudioProject, track: Track) -> Pattern:
     patterns = project.patterns_on(track)
-    index = ask_choice("Step 3 of 4  -  Which pattern did you already correct?",
+    index = ask_choice("Step 3 of 5  -  Which pattern did you already correct?",
                        "  Enter the number of your corrected pattern: ",
                        [pattern.label for pattern in patterns])
     return patterns[index]
@@ -367,7 +368,7 @@ def ask_for_channel(project: FlStudioProject, source: Pattern) -> int:
     channels = sorted({note.channel for note in source.notes})
     if not channels:
         raise Stop("That pattern has no notes, so there is nothing to copy.")
-    index = ask_choice("Step 4 of 4  -  Which channel's velocities should be copied?",
+    index = ask_choice("Step 4 of 5  -  Which channel's velocities should be copied?",
                        "  Enter the number of the channel: ",
                        [project.channel_label(channel) for channel in channels])
     return channels[index]
@@ -380,52 +381,80 @@ def other_patterns_on_track(project: FlStudioProject, track: Track, source: Patt
     return targets
 
 
-def source_velocities(source: Pattern, channel: int) -> dict[int, list[int]]:
-    velocities_by_key: dict[int, set[int]] = {}
+def source_velocity_counts(source: Pattern, channel: int) -> dict[int, Counter[int]]:
+    counts_by_key: dict[int, Counter[int]] = {}
     for note in source.notes:
         if note.channel == channel:
-            velocities_by_key.setdefault(note.key, set()).add(note.velocity)
-    return {key: sorted(velocities) for key, velocities in velocities_by_key.items()}
+            counts_by_key.setdefault(note.key, Counter())[note.velocity] += 1
+    return counts_by_key
+
+
+def describe_counts(counts: Counter[int]) -> str:
+    return ", ".join(f"{velocity} x{count}" for velocity, count in counts.most_common())
+
+
+def ask_for_velocities(counts_by_key: dict[int, Counter[int]]) -> dict[int, int]:
+    velocity_by_key = {key: next(iter(counts)) for key, counts in counts_by_key.items()
+                       if len(counts) == 1}
+    conflicting_keys = sorted(key for key, counts in counts_by_key.items() if len(counts) > 1)
+    print("Step 5 of 5  -  Keys with several velocities in your corrected pattern")
+    if not conflicting_keys:
+        print("  None - nothing to choose.\n")
+    for key in conflicting_keys:
+        options = counts_by_key[key].most_common()
+        labels = [f"Use {velocity} ({count} note{'s' if count != 1 else ''})"
+                  for velocity, count in options]
+        index = ask_choice(f"  {key_label(key)}:", "  Enter your choice: ",
+                           labels + ["Don't overwrite this key"])
+        if index < len(options):
+            velocity_by_key[key] = options[index][0]
+    return velocity_by_key
 
 
 def plan_velocity_copy(project: FlStudioProject, source: Pattern, targets: list[Pattern],
-                       channel: int) -> Plan:
-    velocities_by_key = source_velocities(source, channel)
-    velocity_by_key = {key: v[0] for key, v in velocities_by_key.items() if len(v) == 1}
-    conflicting = {key: v for key, v in velocities_by_key.items() if len(v) > 1}
+                       channel: int, velocity_counts_by_key: dict[int, Counter[int]],
+                       velocity_by_key: dict[int, int]) -> Plan:
     changes = []
-    untouched: dict[int, list[str]] = {}
+    missing: dict[int, list[str]] = {}
+    skipped: dict[int, list[str]] = {}
     for pattern in targets:
         for note in pattern.notes:
             if note.channel != channel:
                 continue
             new_velocity = velocity_by_key.get(note.key)
             if new_velocity is None:
+                untouched = skipped if note.key in velocity_counts_by_key else missing
                 labels = untouched.setdefault(note.key, [])
                 if pattern.label not in labels:
                     labels.append(pattern.label)
             elif note.velocity != new_velocity:
                 changes.append(VelocityChange(pattern, note, new_velocity))
-    return Plan(source, project.channel_label(channel), velocity_by_key, conflicting,
-                targets, changes, untouched)
+    return Plan(source, project.channel_label(channel), velocity_counts_by_key,
+                velocity_by_key, targets, changes, missing, skipped)
 
 
 def show_plan(plan: Plan) -> None:
     show_source_velocities(plan)
     show_changes_per_pattern(plan)
-    show_untouched_keys(plan)
+    show_untouched_keys("Left untouched - not in your corrected pattern:",
+                        plan.missing_patterns_by_key)
+    show_untouched_keys("Left untouched - you chose not to overwrite:",
+                        plan.skipped_patterns_by_key)
     changed_patterns = len({change.pattern.iid for change in plan.changes})
     print(f"\nIn total {len(plan.changes)} notes in {changed_patterns} patterns will change.\n")
 
 
 def show_source_velocities(plan: Plan) -> None:
     print(f"Source: {plan.source.label}, {plan.channel_label}")
-    for key in sorted(plan.velocity_by_key.keys() | plan.conflicting_velocities_by_key.keys()):
-        if key in plan.velocity_by_key:
+    for key in sorted(plan.velocity_counts_by_key):
+        counts = plan.velocity_counts_by_key[key]
+        if len(counts) == 1:
             print(f"  {key_label(key):<24} {plan.velocity_by_key[key]}")
+        elif key in plan.velocity_by_key:
+            print(f"  {key_label(key):<24} {plan.velocity_by_key[key]}"
+                  f"  (your choice from {describe_counts(counts)})")
         else:
-            velocities = ", ".join(map(str, plan.conflicting_velocities_by_key[key]))
-            print(f"  {key_label(key):<24} SKIPPED - several velocities ({velocities})")
+            print(f"  {key_label(key):<24} not overwritten ({describe_counts(counts)})")
 
 
 def show_changes_per_pattern(plan: Plan) -> None:
@@ -442,11 +471,11 @@ def show_changes_per_pattern(plan: Plan) -> None:
             print(f"  {key_label(key):<24} {before:>6} {after:>6} {count:>6}")
 
 
-def show_untouched_keys(plan: Plan) -> None:
-    if plan.untouched_patterns_by_key:
-        print("\nLeft untouched - keys missing from the source or skipped above:")
-        for key in sorted(plan.untouched_patterns_by_key):
-            print(f"  {key_label(key)}: {', '.join(plan.untouched_patterns_by_key[key])}")
+def show_untouched_keys(heading: str, patterns_by_key: dict[int, list[str]]) -> None:
+    if patterns_by_key:
+        print(f"\n{heading}")
+        for key in sorted(patterns_by_key):
+            print(f"  {key_label(key)}: {', '.join(patterns_by_key[key])}")
 
 
 def stop_if_nothing_to_change(plan: Plan) -> None:
@@ -477,7 +506,9 @@ def run() -> None:
     source = ask_for_source_pattern(project, track)
     channel = ask_for_channel(project, source)
     targets = other_patterns_on_track(project, track, source)
-    plan = plan_velocity_copy(project, source, targets, channel)
+    velocity_counts = source_velocity_counts(source, channel)
+    velocity_by_key = ask_for_velocities(velocity_counts)
+    plan = plan_velocity_copy(project, source, targets, channel, velocity_counts, velocity_by_key)
     show_plan(plan)
     stop_if_nothing_to_change(plan)
     apply_if_confirmed(project, plan)
